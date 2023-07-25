@@ -10,23 +10,31 @@ class Stack():
         self.__stack = []
 
     # Methods
-    def push():
-        pass
+    def push(self, data):
+        self.__stack.append(data)
 
-    def pop():
-        pass
+    def pop(self):
+        if not self.isEmpty():
+            return self.__stack.pop()
+        else:
+            raise IndexError("Stack is empty. Cannot pop from an empty stack.")
 
-    def peek():
-        pass
+    def peek(self):
+        if not self.isEmpty():
+            return self.__stack[-1]
+        else:
+            raise IndexError("Stack is empty. Cannot peek from an empty stack.")
 
-    def isEmpty():
-        pass
+    def isEmpty(self):
+        return self.__stack == []
 
-    def size():
-        pass
+    def size(self):
+        return len(self.stack)
 
-    def clear():
-        pass
+    def clear(self):
+        self.__stack = []
 
     def __str__(self):
-        pass
+        fmt = f"Stack: {self.__stack}"
+        return fmt
+    
