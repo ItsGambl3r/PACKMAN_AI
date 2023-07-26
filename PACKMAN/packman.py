@@ -1,7 +1,7 @@
 import pygame
 from pygame.locals import *
 from hashMap import HashMap
-from vector import Vector2
+from vector import Vector2 
 from constants import *
 
 class PackMan(object):
@@ -9,11 +9,9 @@ class PackMan(object):
         self.__name = PACKMAN
         self.__position = Vector2(200, 400)
         hash_map = HashMap(5)
-        hash_map.put(UP, Vector2(0, -1)) #TODO: Find a better way to do this
-        hash_map.put(DOWN, Vector2(0, 1))
-        hash_map.put(LEFT, Vector2(-1, 0))
-        hash_map.put(RIGHT, Vector2(1, 0))
-        hash_map.put(STOP, Vector2(0, 0))
+        hash_map.add_all([(UP, Vector2(0, -1)), (DOWN, Vector2(0, 1)), 
+                          (LEFT, Vector2(-1, 0)), (RIGHT, Vector2(1, 0)), 
+                          (STOP, Vector2(0, 0))])
         self.__directions = hash_map
         self.__direction = STOP
         self.__speed = 100

@@ -31,6 +31,10 @@ class HashMap():
         index = hash(key, self.__size)
         self.__map[index].append((key, value))
 
+    def add_all(self, key_value_pairs: list):
+        for pair in key_value_pairs:
+            self.put(pair[0], pair[1])
+
     def get(self, key):
         index = hash(key, self.__size)
         if self.__map[index].isEmpty():
@@ -43,7 +47,7 @@ class HashMap():
                 current = current.get_next()
             return None
 
-    #TODO: Implement remove method
+    #TODO: verify remove works
     def remove(self, key):
         index = hash(key, self.__size)
         self.__map[index].delete_node(key)
@@ -62,6 +66,16 @@ class HashMap():
     
     def clear(self):
         self.__map = [LinkedList() for i in range(self.__size)]
+
+    def get_keys(self):
+        keys = []
+        for i in range(self.__size):
+            if not self.__map[i].isEmpty():
+                current = self.__map[i].get_head()
+                while current != None:
+                    keys.append(current.get_data()[0])
+                    current = current.get_next()
+        return keys
 
     # Operator Overloading
     def __str__(self):

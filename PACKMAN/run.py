@@ -2,6 +2,7 @@ import pygame
 from pygame.locals import *
 from packman import PackMan
 from constants import *
+from nodes import NodeGroup
 
 class GameController(object):
     def __init__(self):
@@ -16,6 +17,8 @@ class GameController(object):
 
     def startGame(self):
         self.setBackground(Colors.BLACK)
+        self.__node_group = NodeGroup()
+        self.__node_group.setup_test_nodes()
         self.__packman = PackMan()
 
     def update(self):
@@ -33,6 +36,7 @@ class GameController(object):
     def render(self):
         self.__screen.blit(self.__background, (0, 0))
         self.__packman.render(self.__screen)
+        self.__node_group.render(self.__screen)
         pygame.display.update()
 
 if __name__ == "__main__":
