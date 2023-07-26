@@ -39,7 +39,7 @@ class Vector2(object):
     
     def asInt(self):
         # Returns a tuple contaning the integer representation of `x` and `y components
-        return Vector2(int(self.__x), int(self.__y))
+        return (int(self.__x), int(self.__y))
 
     # Operator Overloading
     def __str__(self):
