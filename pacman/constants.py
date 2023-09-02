@@ -1,0 +1,30 @@
+# Window size
+TILE_WIDTH = 24
+TILE_HEIGHT = 24
+NUM_ROWS = 36
+NUM_COLS = 30 
+SCREEN_WIDTH = TILE_WIDTH * NUM_COLS
+SCREEN_HEIGHT = TILE_HEIGHT * NUM_ROWS
+SCREEN_SIZE = (SCREEN_WIDTH, SCREEN_HEIGHT)
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+
+YELLOW = (255, 255, 0)
+PINK = (255, 0, 255)
+CYAN = (0, 255, 255)
+ORANGE = (255, 165, 0)
+
+
+# Directions
+UP = 'up'
+DOWN = 'down'
+LEFT = 'left'
+RIGHT = 'right'
+
+# Pacman
