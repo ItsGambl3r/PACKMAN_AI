@@ -1,77 +1,123 @@
-import pygame
+# Import necessary modules and classes
 from abc import ABC, abstractmethod
+from typing import List, Tuple
 from constants import *
 from vector import Vector2D
 
 class Entity(ABC):
     def __init__(self, tile):
-        self.color = None
-        self.can_pass_doors = True
-        self.radius = 10
+        self.elapsed_time, self.timer = 0, 0
+        self.phase = LEAVE_GHOST_HOUSE
+        self.animation_timer = 0
         self.is_visible = True
-        self.speed = 100
-        self.directions = {UP : Vector2D(0, -1), DOWN : Vector2D(0, 1), 
-                           LEFT : Vector2D(-1, 0), RIGHT : Vector2D(1, 0), None : Vector2D(0, 0)}
+        self.sprite_toggle = False
+
+        # Movement Attributes
+        self.speed = 0
+        self.directions = {
+            UP : Vector2D(0, -1),
+            DOWN : Vector2D(0, 1),
+            LEFT : Vector2D(-1, 0),
+            RIGHT : Vector2D(1, 0),
+            None : Vector2D(0, 0)
+        }
         self.current_direction = None
+
+        # Tile Related Attributes
         self.tile = tile
-        self.target_tile = tile
-        self.start_tile = tile
-        self.setPosition()
+        self.next_tile = tile
+        self.starting_tile = tile
+
+        # Initialize the entity's position
+        self.set_position()
+
+    @staticmethod  
+    def opposite_direction(direction: int) -> int:
+        '''
+        Returns the opposite direction
+
+        Args:
+            direction (int): The direction to get the opposite of
+        '''
+        if direction == UP:
+            return DOWN
+        if direction == DOWN:
+            return UP
+        if direction == LEFT:
+            return RIGHT
+        if direction == RIGHT:
+            return LEFT
+        return None
     
-    @staticmethod
-    def oppositeDirection(direction):
-        if direction == 'up':
-            return 'down'
-        elif direction == 'down':
-            return 'up'
-        elif direction == 'left':
-            return 'right'
-        elif direction == 'right':
-            return 'left'
-        else:
-            return None
-    
-    def resetPosition(self):
+    def reset(self):
+        '''Resets the entity to its initial state'''
+        self.elapsed_time = 0
         self.current_direction = None
-        self.tile = self.target_tile = self.start_tile
-        self.setPosition()
+        self.tile = self.next_tile = self.starting_tile
+        self.set_position()
 
-    def setPosition(self):
+    def set_position(self):
+        '''Sets the entity's position'''
         self.position = self.tile.position.copy()
-
-    def handlePortal(self):
-        if self.target_tile.portal is not None:
-                self.target_tile = self.target_tile.portal
-                self.tile = self.target_tile
-                self.setPosition()
-
-    def hasReachedTargetTile(self):
-        position_to_target = self.target_tile.position - self.position
-        node_to_target = self.target_tile.position - self.tile.position
-        dot_product = position_to_target.dot(node_to_target)
-        if dot_product <= 0:
-            return True
-        return False
     
-    def canMoveInDirection(self, direction):
-        if direction is not None:
-            if self.can_pass_doors == False:
-                return self.tile.neighbors[direction].tile_type != 'wall' and \
-                     self.tile.neighbors[direction].tile_type != 'ghost_door' 
-            else:
-                return self.tile.neighbors[direction].tile_type != 'wall' 
+    def set_speed(self, speed: float):
+        '''
+        Sets the entity's speed
 
-    def determineTargetTile(self, direction):
-        if self.canMoveInDirection(direction):
-            return self.tile.neighbors[direction]
+        Args:
+            speed (float): The speed to set
+        '''
+        self.speed = speed
+
+    def has_reached_next_tile(self) -> bool:
+        '''Returns whether the entity has reached the next tile'''
+        positon_to_target = self.next_tile.position - self.position
+        tile_to_target = self.next_tile.position - self.tile.position
+        dot_product = positon_to_target.dot(tile_to_target)
+        return dot_product <= 0
+    
+    def check_for_portal(self):
+        '''Checks if the entity is on a portal'''
+        if self.next_tile.is_portal:
+            self.next_tile = self.next_tile.portal_destination
+            self.tile = self.next_tile
+            self.set_position()
+    
+    def can_move_in_direction(self, direction):
+        '''
+        Returns whether the entity can move in the given direction
+        based on the entity's current phase
+        Args:
+            direction (int): The direction to check
+        '''
+        if direction is None:
+            return False
         else:
-            return self.tile
+            movement_rules = { 
+                None : [WALL, GHOST_DOOR, GHOST_HOUSE],
+                SCATTER : [WALL, GHOST_DOOR, GHOST_HOUSE],
+                CHASE : [WALL, GHOST_DOOR, GHOST_HOUSE],
+                FRIGHTENED : [WALL, GHOST_DOOR, GHOST_HOUSE],
+                EATEN : [WALL],
+                LEAVE_GHOST_HOUSE : [WALL]
+            }
 
+            current_phase = self.phase
+            tile_type = self.tile.neighbors[direction].type
+            if tile_type in movement_rules[current_phase]:
+                return False
+            return True
+        
+    def determine_next_tile(self, direction):
+        ''' Determines the next tile for the entity to move to '''
+        if self.can_move_in_direction(direction):
+            return self.tile.neighbors[direction]
+        return self.tile
+    
     @abstractmethod
-    def update(self, dt):
+    def update(self, delta_time):
         pass
 
+    @abstractmethod
     def render(self, screen):
-        if self.is_visible:
-            position = self.position + Vector2D(TILE_WIDTH // 2, TILE_HEIGHT // 2)
-            pygame.draw.circle(screen, self.color, position.asTuple(), self.radius)
+        pass

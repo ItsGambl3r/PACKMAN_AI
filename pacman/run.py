@@ -1,308 +1,402 @@
-import os
-import pickle
-import pygame 
-import neat
-from text import Score
+import pygame, sys, random, pickle, neat, os
+from pygame.locals import *
+from constants import *
 from tiles import TileCollection
-from pellets import Pellet, PowerPellet, Fruit
 from agent import Agent
 from ghost import Blinky, Pinky, Inky, Clyde
+from items import *
+from text import Score
 from neat_utils import get_largest_checkpoint
 
-SCREEN_SIZE = (720, 864)
-BLACK = (0, 0, 0)
-
 class GameController(object):
+    '''
+    A class that controls the game loop and game state
+    '''
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode(SCREEN_SIZE)
-        self.display = pygame.display.set_caption("Pacman")
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.clock = pygame.time.Clock()
-
-    def setBackground(self):
+        self.max_phase_intervals = {
+            'scatter' : (7, 10),
+            'chase' : (2, 5),
+        }
+    
+    def set_background(self):
+        '''Sets the background of the screen'''
         self.background = pygame.Surface(SCREEN_SIZE).convert()
-        self.background.fill(BLACK)
+        self.screen.fill(BLACK)
 
-    def startGame(self):
-        self.setBackground()
-        self.surivalTime = 0 #TODO: implement in agent class
-        self.score = Score(0, (SCREEN_SIZE[0] // 2, 50))
+    def start(self, genomes, config):
+        '''Starts the game'''
+        self.set_background()
+        self.phase = SCATTER
+        self.phase_timer, self.phase_interval = 0, random.randint(*self.max_phase_intervals[self.phase])
+        self.tiles = TileCollection()
+        self.special_items = [Cherry, Strawberry, Orange, Apple, Pretzel, GalaxianFlagship, Bell, Key]
+        self.score = Score((SCREEN_WIDTH // 2, 25))
+        self.high_score = Score((SCREEN_WIDTH // 2, 25))
 
-        # Load the tile collection
-        self.tileCollection = TileCollection(os.path.join("pacman", "Assets", "Levels", "level1.txt"))
+        self.agents = []
+        self.agent_ghost_pairs = {}
 
-        # Set the portal tiles #TODO: create a function for this
-        self.tileCollection.lookup_table[(24, 408)].portal = self.tileCollection.lookup_table[(672, 408)]
-        self.tileCollection.lookup_table[(672, 408)].portal = self.tileCollection.lookup_table[(24, 408)]
+        for genome_id, genome in genomes:
+            genome.fitness = 0
+            net = neat.nn.FeedForwardNetwork.create(genome, config)
+            agent = Agent(self.tiles.get_tile(14, 26), net)
+            self.agents.append(agent)
+            self.agent_ghost_pairs[agent] = {
+                'blinky' : Blinky(self.tiles.get_tile(16, 16)),
+                'pinky' : Pinky(self.tiles.get_tile(11, 16)),
+                'inky' : Inky(self.tiles.get_tile(16, 18)),
+                'clyde' : Clyde(self.tiles.get_tile(11, 18))
+            }
+            self.alive_agents = len(self.agents)
+            
+            self.best_agent = self.find_best_agent()
+
+        self.show_best_agent = False
+    
+    def find_best_agent(self):
+        '''Finds the best agent'''
+
+        highest_score = 0
+        best_agent = None
+
+        # Iterate through all the agents
+        for agent in self.agents:
+            # Check if the agent has a higher score than the current highest score
+            # and if the agent is alive
+            if agent.score > highest_score and agent.alive:
+                # Update the highest score and set the best_agent to this agent
+                highest_score = agent.score
+                best_agent = agent
+
+            # Check if the agent's score is higher than the overall high score
+            if agent.score > self.high_score.score:
+                # Update the overall high score
+                self.high_score.score = agent.score
+
+        # Set self.best_agent to the best_agent found in the loop
+        self.best_agent = best_agent
 
 
-        self.agent = Agent(self.tileCollection.lookup_table[(360, 624)]) 
-        
-        # Set the starting positions for the ghosts
-        self.blinky = Blinky(self.tileCollection.lookup_table[(408, 384)])
-        self.pinky = Pinky(self.tileCollection.lookup_table[(288, 384)])
-        self.inky = Inky(self.tileCollection.lookup_table[(408, 432)])
-        self.clyde = Clyde(self.tileCollection.lookup_table[(288, 432)])
-        self.ghosts = [self.blinky, self.pinky, self.inky, self.clyde]
+    def get_game_state(self, agent):
+        """Get the game state information for a given agent.
 
-    def get_game_state_inputs(self):
-        # Create a dictionary to store game state information
-        game_state = {}
+        Args:
+            agent: The agent for which to retrieve the game state.
 
-        # Define a mapping of tile types to numerical values
-        tile_type_mapping = {
-            'empty': 0.0,
-            'pellet': 1.0,
-            'power_pellet': 2.0,
-            'fruit': 3.0,
-            'wall': 4.0,  
+        Returns:
+            game_state: A list containing the game state information.
+        """
+        # Define a dictionary to map constants to numerical values
+        constants_dict = {
+            UP: 0, DOWN: 1, LEFT: 2, RIGHT: 3, SCATTER: 4,
+            CHASE: 5, FRIGHTENED: 6, EATEN: 7, LEAVE_GHOST_HOUSE: 8,
+            EMPTY: 9, WALL: 10, GHOST_DOOR: 11, GHOST_HOUSE: 12,
+            None: 13
         }
 
-        direction_mapping = {
-            None : 0.0,
-            'up': 1.0,
-            'down': 2.0,
-            'left': 3.0,
-            'right': 4.0,
-        }
+        # Initialize the game state list
+        game_state = []
 
-        mode_mapping = {
-            'chase': 0.0,
-            'scatter': 1.0,
-            'frightened': 2.0,
-            'eaten': 3.0,
-            'escape': 4.0,
-        }
+        # Add information about the game phase
+        game_state.append(constants_dict[self.phase])
 
-        # Retrieve relevant game state information and store it in the dictionary
-        game_state["agent_position.x"] = int(self.agent.position.x)
-        game_state["agent_position.y"] = int(self.agent.position.y)
-        game_state["agent_direction"] = direction_mapping[self.agent.current_direction]
+        # Get the agent's position and add it to the game state
+        agent_position = agent.position.as_tuple()
+        game_state.append(int(agent_position[0]))
+        game_state.append(int(agent_position[1]))
 
-        # Get agent's tile neighbors using the mapping
-        game_state["up_neighbor"] = tile_type_mapping[self.agent.tile.neighbors['up'].tile_type]
-        game_state["down_neighbor"] = tile_type_mapping[self.agent.tile.neighbors['down'].tile_type]
-        game_state["left_neighbor"] = tile_type_mapping[self.agent.tile.neighbors['left'].tile_type]
-        game_state["right_neighbor"] = tile_type_mapping[self.agent.tile.neighbors['right'].tile_type]
+        # Add the agent's current direction, idle timer, score, and lives
+        game_state.append(constants_dict[agent.current_direction])
+        game_state.append(int(agent.idle_timer))
+        game_state.append(agent.score)
+        game_state.append(agent.lives)
 
-        game_state['blinky_position.x'] = int(self.blinky.position.x)
-        game_state['blinky_position.y'] = int(self.blinky.position.y)
-        game_state["blinky_direction"] = direction_mapping[self.blinky.current_direction]
-        game_state["blinky_mode"] = mode_mapping[self.blinky.mode]
+        for direction in [UP, DOWN, LEFT, RIGHT]:
+            try:
+                if agent.can_move_in_direction(direction):
+                    game_state.append(1)
+                else:
+                    game_state.append(0)
+            except:
+                game_state.append(0)
 
-        game_state["pinky_position.x"] = int(self.pinky.position.x)
-        game_state["pinky_position.y"] = int(self.pinky.position.y)
-        game_state["pinky_direction"] = direction_mapping[self.pinky.current_direction]
-        game_state["pinky_mode"] = mode_mapping[self.pinky.mode]
+        # Iterate over the ghosts associated with the agent
+        for ghost in self.agent_ghost_pairs[agent].values():    
+            # Get the ghost's position and add it to the game state
+            ghost_position = ghost.position.as_tuple()
+            game_state.append(int(ghost_position[0]))
+            game_state.append(int(ghost_position[1]))
 
-        game_state["inky_position.x"] = int(self.inky.position.x)
-        game_state["inky_position.y"] = int(self.inky.position.y)
-        game_state["inky_direction"] = direction_mapping[self.inky.current_direction]
-        game_state["inky_mode"] = mode_mapping[self.inky.mode]
+            # Add the distance between the agent and the ghost
+            game_state.append(int(agent.position.distance(ghost.position)))
 
-        game_state["clyde_position.x"] = int(self.clyde.position.x)
-        game_state["clyde_position.y"] = int(self.clyde.position.y)
-        game_state["clyde_direction"] = direction_mapping[self.clyde.current_direction]
-        game_state["clyde_mode"] = mode_mapping[self.clyde.mode]
+            # Add the ghost's current direction and phase
+            game_state.append(constants_dict[ghost.current_direction])
+            game_state.append(constants_dict[ghost.phase])
 
-        # Return the collected game state information as a list with numerical values
-        game_state_values = list(game_state.values())
-        return game_state_values
+        # Return the populated game state list
+        return game_state
 
+    def interpret_action(self, action_outputs):
+        """_summary_
 
-    def interpret_action_outputs(self, action_outputs):
-        best_action_index = action_outputs.index(max(action_outputs))
-        if best_action_index == 0:
-            return 'up'
-        elif best_action_index == 1:
-            return 'down'
-        elif best_action_index == 2:
-            return 'left'
-        elif best_action_index == 3:
-            return 'right'
+        Args:
+            action_outputs (_type_): _description_
+        """
+        best_action = action_outputs.index(max(action_outputs))
+        if best_action == 0:
+            return UP
+        elif best_action == 1:
+            return DOWN
+        elif best_action == 2:
+            return LEFT
+        elif best_action == 3:
+            return RIGHT
         else:
-            return None
-
-    def get_final_score(self):
-        return(0.8 * self.agent.score) + (0.2 * self.agent.survival_time)
-
-    def update(self, neural_network):
-        delta_time = self.clock.tick(30) / 1000.0
-
-        game_state_inputs = self.get_game_state_inputs()
-        action_outputs = neural_network.activate(game_state_inputs) #mabey its the positon stuff
-        agent_action = self.interpret_action_outputs(action_outputs)
-
-        self.agent.update(agent_action, delta_time)
-
-        for ghost in self.ghosts:
-            ghost.update(delta_time, self.agent, self.tileCollection.lookup_table)
-
-        self.handle_item_collisions(self.agent)
-        self.manage_ghost_modes(delta_time, self.tileCollection.lookup_table)
-        self.update_flashing_events(delta_time)
+            raise ValueError('Invalid action output')
+        
+    def get_fitness(self, agent):
+        '''Returns the fitness of the agent'''
+        return agent.score
+    
+    def update(self):
+        '''Updates the game state'''
+        delta_time = self.clock.tick(60) / 1000.0
+        for agent in self.agents:
+            if agent.alive:
+                game_state = self.get_game_state(agent)
+                action_outputs = agent.neural_network.activate(game_state)
+                direction = self.interpret_action(action_outputs)
+                agent.update(direction, delta_time)
+                for ghost in self.agent_ghost_pairs[agent].values():
+                    ghost.update(delta_time, agent, self.tiles.look_up_table)
+                self.check_collisions(agent)
+                self.score.update(agent)
+                self.update_game_phase(delta_time)
+                self.update_ghosts_phase(agent, delta_time)
+                if agent.is_idle:
+                    agent.alive = False
+        self.check_alive_agents()
+        self.handle_flashing_events(delta_time)
+        self.find_best_agent()
+        try:
+            self.score.update(self.best_agent.score)
+        except:
+            self.score.update(0)
+        self.high_score.text = 'HIGH SCORE: ' + str(self.high_score.score)
         self.check_events()
-        self.render(self.screen)
+        # print(self.high_score.score, self.best_agent.score)
 
     def check_events(self):
+        '''Checks for events'''
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                exit()
+                sys.exit()
+            elif event.type == KEYDOWN and event.key == K_SPACE:
+                self.show_best_agent = not self.show_best_agent
 
-    def handle_item_collisions(self, agent):
-        # First, check pellet collisions
-        if isinstance(agent.tile.tile_item, Pellet) or isinstance(agent.tile.tile_item, Fruit):
-            if not agent.tile.tile_item.is_eaten:
-                    points = agent.tile.tile_item.points
-                    agent.tile.tile_item.eat()
-                    agent.score += points
-                    self.score.addPoints(points)
-
-        elif isinstance(agent.tile.tile_item, PowerPellet):
-            if not agent.tile.tile_item.is_eaten:
-                points = agent.tile.tile_item.points #TODO: set attribute name to 'item' instead of 'tile_item'
-                agent.tile.tile_item.eat()
-                agent.score += points #TODO: implement this eat() method
-                self.score.addPoints(points)
-                for ghost in self.ghosts:
-                    ghost.mode = 'frightened'
-                    ghost.speed = 50
-                    ghost.timer = 0
+    def spawn_special_item(self):
+        '''Selects a random tile and spawns an item on it'''
+        raise NotImplementedError
+        '''if len(self.pacman.collected_items) % 38 == 0 and self.tiles.unique_item is None:
+            if len(self.special_items) == 0:
+                return
+            empty_tiles = []
+            for tile in self.tiles.look_up_table.values():
+                if tile.type == PATH and tile.item in self.pacman.collected_items:
+                    empty_tiles.append(tile)
+            if empty_tiles:
+                random_tile = random.choice(empty_tiles)
+                item = self.special_items.pop(0)(random_tile.position.as_tuple())
+                self.tiles.unique_item = item
+                self.tiles.items.append(item)
+                random_tile.item = item'''
         
-        # Next, check ghost collisions
-        for ghost in self.ghosts:
-            if agent.tile == ghost.tile:
-                ghost.timer = 0
-                if ghost.mode == 'frightened':
-                    ghost.mode = 'eaten'
-                    ghost.can_pass_doors = True #TODO: rename this attribute to 'can_pass_gates'
-                    ghost.speed = 125
-                    agent.score += 200
-                    self.score.addPoints(200)
-                elif ghost.mode in ['escape', 'scatter', 'chase']: #TODO: look at escape mode may not be necessary
-                    agent.lives -= 1
-                    agent.resetPosition()
-                    for ghost in self.ghosts:
-                        ghost.resetPosition()
-                        ghost.mode = 'escape'
-                        ghost.can_pass_doors = True #TODO: if mode is escape or eaten, then can_pass_doors is True
-                        ghost.timer = 0
-                    if agent.lives == 0:
-                        self.is_game_over() #TODO: implement this function
-                          
-    def manage_ghost_modes(self, delta_time, lookup_table): #TODO: randomize timer for scatter and chase modes
-        for ghost in self.ghosts:
-            if ghost.mode == 'chase':
-                ghost.timer += delta_time
-                if ghost.timer >= ghost.chase_timer_max:
-                    ghost.timer -= ghost.chase_timer_max
-                    ghost.mode = 'scatter'
+    def check_collisions(self, agent):
+        for item in self.tiles.items:
+            distance_to_agent = agent.position.distance(item.position)
 
-            elif ghost.mode == 'scatter':
-                ghost.timer += delta_time
-                if ghost.timer >= ghost.scatter_timer_max:
-                    ghost.timer -= ghost.scatter_timer_max
-                    ghost.mode = 'chase'
+            if distance_to_agent <= item.collision_radius and item not in agent.collected_items:
+                agent.collected_items.append(item)
+                agent.score += item.POINTS
 
-            elif ghost.mode == 'frightened':
-                ghost.timer += delta_time
-                if ghost.timer >= ghost.frightened_timer_max:
-                    ghost.timer -= ghost.frightened_timer_max
-                    ghost.mode = 'chase'
-                    ghost.speed = 100
+                if item.name == 'power_pellet':
+                    for ghost in self.agent_ghost_pairs[agent].values():
+                        if ghost.phase not in [EATEN, LEAVE_GHOST_HOUSE]:
+                            ghost.phase = FRIGHTENED
+                            ghost.speed = 50
+                            ghost.elapsed_time = 0
 
-            elif ghost.mode == 'eaten':
-                if ghost.tile.tile_item is None:
-                    ghost.timer += delta_time
-                    if ghost.timer >= ghost.eaten_timer_max:
-                        ghost.timer -= ghost.eaten_timer_max
-                        ghost.can_pass_doors = True
-                        ghost.mode = 'escape'
+            for ghost in self.agent_ghost_pairs[agent].values():
+                if ghost.position.distance(agent.position) <= ghost.collision_radius:
+                    if ghost.phase == FRIGHTENED:
+                        ghost.phase = EATEN
+                        ghost.speed = 150
+                        ghost.elapsed_time = 0
+                        agent.score += 200
+                    elif ghost.phase == CHASE or ghost.phase == SCATTER:
+                        agent.lives -= 1
+                        agent.reset_position()
+                        for ghost in self.agent_ghost_pairs[agent].values():
+                            ghost.reset()
+                            ghost.phase = LEAVE_GHOST_HOUSE
+                        return   
 
-            elif ghost.mode == 'escape':
-                if ghost.tile.tile_item is not None:
-                    ghost.can_pass_doors = False
-                    ghost.mode = 'chase'
-                    ghost.speed = 100
+    def switch_phase(self):
+        '''Switches the phase'''
+        if self.phase == SCATTER:
+            self.phase = CHASE
+        elif self.phase == CHASE:
+            self.phase = SCATTER
+        self.phase_interval = random.randint(*self.max_phase_intervals[self.phase])
+        self.phase_timer = 0
 
-    def update_flashing_events(self, delta_time):
-        self.agent.flash(delta_time)
-        for tile in self.tileCollection.lookup_table.values():
-            if tile.tile_item and isinstance(tile.tile_item, PowerPellet):
-                tile.tile_item.flash(delta_time)
+    def update_game_phase(self, delta_time: float):
+        self.phase_timer += delta_time  
+        if self.phase_timer >= self.phase_interval:
+            self.switch_phase()
 
-    def render(self, screen):
-        self.screen.blit(self.background, (0, 0))
-        self.tileCollection.render(self.screen)
-        self.score.render(self.screen)
+    def update_ghosts_phase(self, agent, delta_time: float):
+        '''Updates the phase of the ghosts'''
+        for ghost in self.agent_ghost_pairs[agent].values():
+            if ghost.phase == FRIGHTENED:
+                ghost.elapsed_time += delta_time
+                if ghost.elapsed_time >= 7:
+                    ghost.phase = CHASE
+                    ghost.elapsed_time = 0
+                    ghost.speed = 75
+            elif ghost.phase == EATEN:
+                if ghost.tile.type == GHOST_HOUSE:
+                    ghost.elapsed_time += delta_time
+                    if ghost.elapsed_time >= 3:
+                        ghost.phase = LEAVE_GHOST_HOUSE
+                        ghost.elapsed_time = 0
+                        ghost.speed = 75
+            elif ghost.phase == LEAVE_GHOST_HOUSE:
+                if ghost.tile.type == PATH:
+                    ghost.phase = SCATTER
+                    ghost.speed = 75
+                    ghost.elapsed_time = 0
 
-        self.agent.render(self.screen)
-        for ghost in self.ghosts:
-            ghost.render(self.screen)
+            if self.phase == CHASE:
+                if ghost.phase == SCATTER:
+                    ghost.phase = CHASE
+                    ghost.speed = 75
+            elif self.phase == SCATTER:
+                if ghost.phase == CHASE:
+                    ghost.phase = SCATTER
+                    ghost.speed = 75
 
+    def handle_flashing_events(self, delta_time: float):
+        for power_pellet in self.tiles.power_pellets:
+            power_pellet.flash(delta_time)
+
+    def handle_flashing_events(self, delta_time: float):
+        for power_pellet in self.tiles.power_pellets:
+            power_pellet.flash(delta_time)
+
+    def check_alive_agents(self):
+        '''Checks if there are any alive agents'''
+        self.alive_agents = 0
+        for agent in self.agents:
+            if agent.alive:
+                self.alive_agents += 1
+
+    def render(self):
+        '''Renders the game state'''
+        if self.show_best_agent or self.alive_agents == 1:
+            if self.best_agent is None:
+                return
+            for tile in self.tiles.look_up_table.values():
+                if tile.item in self.best_agent.collected_items:
+                    tile.render(self.screen, False)
+                else:
+                    tile.render(self.screen, True)
+            self.best_agent.render(self.screen)
+
+            for ghost in self.agent_ghost_pairs[self.best_agent].values():
+                ghost.render(self.screen)
+            self.score.render(self.screen)
+        else:
+            self.screen.blit(self.background, (0, 0))
+            self.tiles.render(self.screen)
+            for agent in self.agents:
+                if agent.alive:
+                    for ghost in self.agent_ghost_pairs[agent].values():
+                        ghost.render(self.screen)
+                    agent.render(self.screen)
+            self.high_score.render(self.screen)
+            # self.high_score.render(self.screen)
+        
         pygame.display.update()
 
     def is_game_over(self):
-        self.agent.is_dead = True
-        return self.get_final_score()
+        '''Returns True if the game is over'''
+        return all([not agent.alive for agent in self.agents])
 
-def evaluate_genome(genome, config):
-    for genome_id, genome in genome:
-        neural_network = neat.nn.FeedForwardNetwork.create(genome, config)
-        game_controller = GameController()
-        game_controller.startGame()
-        while not game_controller.agent.is_dead:
-            game_controller.update(neural_network)
+    # ------------------ NEAT ------------------ #
+def eval_genomes(genomes, config):
+    '''Evaluates the genomes'''
+    game_controller = GameController()
+    game_controller.start(genomes, config)
+    while not game_controller.is_game_over():
+        game_controller.update()
+        game_controller.render()
 
-        game_score = game_controller.get_final_score()
-        genome.fitness = game_score
+    for genome_id, genome in genomes:
+        for agent in game_controller.agents:
+            if agent.neural_network is genome:
+                genome.fitness = game_controller.get_fitness(agent)
 
 
-'''def run(config):
-    # To restore a checkpoint, use the following code:
-    # population = neat.Checkpointer.restore_checkpoint("neat-checkpoint-4")
+def run(config_file):
+    '''Runs the NEAT algorithm'''
+    checkpoint_dir = os.path.join(os.getcwd(), 'checkpoints')
+    larget_checkpoint = get_largest_checkpoint(checkpoint_dir)
 
-    checkpoint_dir = "Check_Points"  # Change this to the directory where your checkpoint files are located
-    largest_checkpoint_file = get_largest_checkpoint(checkpoint_dir)
-
-    if largest_checkpoint_file is not None:
-        population = neat.Checkpointer.restore_checkpoint(largest_checkpoint_file)
+    if larget_checkpoint is not None:
+        p = neat.Checkpointer.restore_checkpoint(larget_checkpoint)
     else:
-        population = neat.Population(config)
+        p = neat.Population(config_file)
 
-    population.add_reporter(neat.StdOutReporter(True))
+    p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
-    population.add_reporter(stats)
+    p.add_reporter(stats)
 
-    # Specify the full path to the checkpoint directory
-    checkpoint_dir_path = os.path.join(os.path.dirname(__file__), checkpoint_dir)
-    checkpoint_saver = neat.Checkpointer(generation_interval=1, time_interval_seconds=None,
-                                         filename_prefix=os.path.join(checkpoint_dir_path, "neat-checkpoint-"))
+    checkpoint_dir_path = os.path.join(os.getcwd(), 'checkpoints')
+    checkpoint_saver = neat.Checkpointer(generation_interval=1, time_interval_seconds=None, filename_prefix=checkpoint_dir_path + '/neat-checkpoint-')
 
-    population.add_reporter(checkpoint_saver)
+    p.add_reporter(checkpoint_saver)
 
-    winner = population.run(evaluate_genome, 100)
-    with open("winner.pkl", "wb") as f:
-        pickle.dump(winner, f)'''
+    winner = p.run(eval_genomes, 1000)
+    with open(os.path.join(checkpoint_dir_path, 'winner.pkl'), 'wb') as output:
+        pickle.dump(winner, output, 1)
 
-def run(config):
-
-    population = neat.Population(config)
-
-    population.add_reporter(neat.StdOutReporter(True))
-    stats = neat.StatisticsReporter()
-    population.add_reporter(stats)
-
-
-    winner = population.run(evaluate_genome, 100)
-    with open("winner.pkl", "wb") as f:
-        pickle.dump(winner, f)
-    
-if __name__ == "__main__":
+if __name__ == '__main__':
     local_dir = os.path.dirname(__file__)
-    config_path = os.path.join(local_dir, "config.txt")
-    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction, 
-                            neat.DefaultSpeciesSet, neat.DefaultStagnation, 
-                            config_path)
+    config_path = os.path.join(local_dir, 'config.txt')
+    config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                         neat.DefaultSpeciesSet, neat.DefaultStagnation, config_path)
     run(config)
+
+
+
+
+    
+
+
+
+  
+
+        
+
+
+
+
+
+
+

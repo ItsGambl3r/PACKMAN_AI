@@ -1,14 +1,18 @@
 import pygame
 
 class SpriteSheet(object):
-    def __init__(self, file_name):
-        self.sprite_sheet = pygame.image.load(file_name).convert_alpha()
+    '''Class representing a sprite sheet'''
+    def __init__(self, file_name: str):
+        """
+        _summary_
 
-    def get_image(self, x, y, width = 8, height = 8):
-        image = self.sprite_sheet.subsurface((x, y, width, height))
-        image = self.resize(image, 24, 24)
+        Args:
+            file_name (str): _description_
+        """
+        self.sprite_sheet = pygame.image.load(file_name).convert()
+    
+    def get_image(self, x: int, y: int, width: int, height: int) -> pygame.Surface:
+        '''Extracts an image from the spritesheet'''
+        image = self.sprite_sheet.subsurface(pygame.Rect(x, y, width, height))
         image.set_colorkey((0, 0, 0))
         return image
-    
-    def resize(self, image, width = 24, height = 24):
-        return pygame.transform.scale(image, (width, height))

@@ -1,227 +1,190 @@
-import pygame
-import os
+# Import necessary modules and classes
+import pygame, os
+from typing import List, Tuple
 from constants import *
 from vector import Vector2D
 from sprites import SpriteSheet
-from pellets import Pellet, PowerPellet, Fruit
-
+from items import Item, Pellet, PowerPellet, Cherry, Strawberry, Orange, Apple
 class Tile(object):
-    num_tiles = 0 
+    '''Class representing a tile object'''
+    num_tiles = 0
 
-    def __init__(self, position: tuple, tile_type: str = 'empty', tile_item = None):
-        self.id = Tile.generateCharacterID()
+    def __init__(self, position: Tuple[float, float], type: str = EMPTY, item: Item = None):
+        """
+        Initialize a Tile object.
+
+        Args:
+            position (Tuple[float, float]): The position of the tile.
+            type (str, optional): The type of the tile. Defaults to EMPTY.
+            item (item, optional): An item associated with the tile. Defaults to None.
+        """
+        self.id = Tile.generate_id()
         self.position = Vector2D(*position)
-        self.neighbors = {UP : None, DOWN : None, LEFT : None, RIGHT : None}
-        self.color = Tile.determineColor(self.position.y)
-        self.font = pygame.font.Font(os.path.join('pacman', 'Assets', 'Fonts', 'PressStart2P-Regular.ttf'), 6)
-        self.tile_type = tile_type # 'empty' or 'wall' or 'tunnel' or 'ghost_spawn' or or 'ghost_door' 
-        self.tile_item = tile_item 
+        self.neighbors = {UP: None, DOWN: None, LEFT: None, RIGHT: None}
+
+        # tile type and associated item
+        self.type = type
+        self.item = item
+
+        self.is_portal = False
+
+        # Visualization attributes
+        self.color = Tile.determine_color(self.position.y)
         self.sprite = None
-        self.portal = None
+
+        # Increment the number of tiles
         Tile.num_tiles += 1
 
     @staticmethod
-    def generateCharacterID():
-        num = Tile.num_tiles 
-        character_id = format(num, '02X')  # Format num as a two-character hexadecimal string
-        return character_id
+    def generate_id() -> int:
+        '''Generates a unique id for the tile'''
+        character_id = format(Tile.num_tiles, '03d')
+        return int(f'1{character_id}')
     
     @staticmethod
-    def determineColor(tile_position_y):
-        row_index = tile_position_y // TILE_HEIGHT
+    def determine_color(tile_position_y: float):
+        '''Determines the color of the tile'''
+        row_index = int(tile_position_y // TILE_WIDTH)
         if (Tile.num_tiles + row_index) % 2 == 0:
-            return (32, 36, 39)  #202427
-        else:
-            return (36, 40, 44)  #24282C
-        
+            return TILE_COLOR_1
+        return TILE_COLOR_2
+    
     @staticmethod
-    def getOppositeDirection(direction):
-        if direction == 'up':
-            return 'down'
-        elif direction == 'down':
-            return 'up'
-        elif direction == 'left':
-            return 'right'
-        elif direction == 'right':
-            return 'left'
-        else:
-            return None
-        
-    def getTileCenter(self):
-        return (self.position.x + TILE_WIDTH // 2, self.position.y + TILE_HEIGHT // 2)
-        
-    def connect(self, neighbor, direction):
-        self.neighbors[direction] = neighbor
-        neighbor.neighbors[Tile.getOppositeDirection(direction)] = self
+    def get_opposite_direction(direction):
+        '''Returns the opposite direction'''
+        if direction == UP:
+            return DOWN
+        if direction == DOWN:
+            return UP
+        if direction == LEFT:
+            return RIGHT
+        if direction == RIGHT:
+            return LEFT
+        raise ValueError(f'Invalid direction {direction}')
 
-    def setWallSprite(self, tile_sheet):
-        if self.tile_type == 'wall':
-            neighbor_tiles = [neighbor for neighbor in self.neighbors.values() if neighbor]
-            neighbor_tile_types = [tile.tile_type for tile in neighbor_tiles]
-            
-            if neighbor_tile_types == ['empty', 'empty', 'empty', 'empty']:
-                pass
+    def get_neighbor_types(self) -> List[str]:
+        '''Returns the types of the neighbors'''
+        neighbor_types = []
+        for neighbor in self.neighbors.values():
+            if neighbor:
+                neighbor_types.append(neighbor.type)
+            else:
+                neighbor_types.append(None)
+        return neighbor_types
+    
+    def get_tile_center(self):
+        '''Returns the center of the tile'''
+        return self.position + Vector2D(TILE_WIDTH // 2, TILE_HEIGHT // 2)
 
-            # top left corners
-            elif neighbor_tile_types == ['empty', 'wall', 'empty', 'wall']:
-                self.sprite = tile_sheet.get_image(10, 1)
+    def connect(self, direction: str, tile: 'Tile') -> None:
+        '''Connects the tile to another tile'''
+        self.neighbors[direction] = tile
+        tile.neighbors[Tile.get_opposite_direction(direction)] = self
 
-            # top right corners
-            elif neighbor_tile_types == ['empty', 'wall', 'wall', 'empty']:
-                self.sprite = tile_sheet.get_image(1, 1)
+    def set_portal(self, tile):
+        '''Sets the tile as a portal'''
+        for arg in [self, tile]:
+            arg.is_portal = True
+            arg.portal_destination = tile if arg is self else self
+    
+    def render(self, screen: pygame.Surface, show_items: bool = True) -> None:
+            '''Renders the tile on the screen'''
+            position = self.position.as_tuple()
+            pygame.draw.rect(screen, self.color, (*position, TILE_WIDTH, TILE_WIDTH))
+            if self.sprite:
+                screen.blit(self.sprite, position)
+            if show_items and self.item:
+                self.item.render(screen)
 
-            # bottom left corners
-            elif neighbor_tile_types == ['wall', 'empty', 'empty', 'wall']:
-                self.sprite = tile_sheet.get_image(10, 10)
-
-            # bottom right corners
-            elif neighbor_tile_types == ['wall', 'empty', 'wall', 'empty']:
-                self.sprite = tile_sheet.get_image(1, 10)
-            
-            # horizontal walls
-            elif neighbor_tile_types == ['empty', 'empty', 'wall', 'wall']:
-                self.sprite = tile_sheet.get_image(28, 1)
-
-            elif neighbor_tile_types == ['empty', 'empty', 'empty', 'wall']:
-                self.sprite = tile_sheet.get_image(28, 1)
-
-            elif neighbor_tile_types == ['empty', 'empty', 'wall', 'empty']:
-                self.sprite = tile_sheet.get_image(28, 1)
-            
-            elif neighbor_tile_types == ['empty', 'empty', 'empty', 'wall']:
-                self.sprite = tile_sheet.get_image(28, 1)
-
-            elif neighbor_tile_types == ['empty', 'empty', 'ghost_door', 'wall']:
-                self.sprite = tile_sheet.get_image(28, 1)
-            elif neighbor_tile_types == ['empty', 'empty', 'wall', 'ghost_door']:
-                self.sprite = tile_sheet.get_image(28, 1)
-
-            # vertical walls
-            elif neighbor_tile_types == ['wall', 'wall', 'empty', 'empty']:
-                self.sprite = tile_sheet.get_image(19, 1)
-
-            # special cases
-            elif neighbor_tile_types == ['empty', 'wall', 'wall', 'wall']:
-                self.sprite = tile_sheet.get_image(19, 10)
-            
-            elif neighbor_tile_types == ['wall', 'empty', 'wall', 'wall']:
-                self.sprite = tile_sheet.get_image(28, 10)
-
-            elif neighbor_tile_types == ['wall', 'wall', 'empty', 'wall']:
-                self.sprite = tile_sheet.get_image(37, 1)
-
-            elif neighbor_tile_types == ['wall', 'wall', 'wall', 'empty']:
-                self.sprite = tile_sheet.get_image(37, 10)
-            
-            elif neighbor_tile_types == ['wall', 'wall', 'wall', 'wall']:
-                self.sprite = tile_sheet.get_image(46, 1)
-        
-    def render(self, screen):
-        tile_position = self.position.asTuple()
-        pygame.draw.rect(screen, self.color, (tile_position, (TILE_WIDTH, TILE_HEIGHT)))
-        if self.sprite:  # Check if the sprite is not None before blitting
-            screen.blit(self.sprite, tile_position)
-        if isinstance(self.tile_item, Pellet):
-            self.tile_item.render(screen)
-        elif isinstance(self.tile_item, PowerPellet):
-            self.tile_item.render(screen)
-        elif isinstance(self.tile_item, Fruit):
-            self.tile_item.render(screen)
-       
     def __str__(self):
         return str(self.id)
     
     def __repr__(self):
         return self.__str__()
-
+    
 class TileCollection(object):
-    def __init__(self, level_file: str):
-        self.tile_symbols = {'.' : 'empty', 'X' : 'wall', '=': 'ghost_door'}
-        level_data, item_data = self.loadLevel(level_file)
-        self.createLookupTable(level_data)
-        self.addTileItems(item_data)
-        self.connectNeighbors(level_data)
+    '''
+    Class representing a collection of tiles
+    '''
+    def __init__(self):
+        self.unique_item = None
+        self.tile_symbols = { 
+            '0' : 'empty', '.' : 'path', 'X' : 'wall',
+            '=' : 'ghost_door', 'H' : 'ghost_house'
+            }
+        level_data = TileCollection.load_level_data(os.path.join('level_1.txt'))
+        self.create_look_up_table(level_data)
+        self.set_tile_sprites(level_data)
+        self.connect_tiles()
+        self.add_items()
+        self.get_tile(0, 17).set_portal(self.get_tile(27, 17))
 
-    @staticmethod
-    def getKey(x, y):
-        return (x * TILE_WIDTH, y * TILE_HEIGHT)
-    
-    @staticmethod
-    def transpose(data):
-        return [list(row) for row in zip(*data)]
-    
-    def loadLevel(self, level_file, level_item_file = os.path.join('pacman', 'Assets', 'Levels', 'collectibles_map.txt')):
+    def load_level_data(level_file: str) -> List[List[str]]:
+        '''Loads the level data from a file'''
         level_data = []
-        with open(level_file, 'r') as file:
+        with open(os.path.join('pacman', 'assets', 'levels', level_file)) as file:
             for line in file:
-                formatted_line = line.strip().split()
-                if formatted_line:
-                    level_data.append(formatted_line)
-
-        item_data = []
-        with open(level_item_file, 'r') as file:
-            for line in file:
-                formatted_line = line.strip().split()
-                if formatted_line:
-                    item_data.append(formatted_line)
-        return level_data, item_data
+                line = line.strip().split()
+                if line:
+                    level_data.append(list(line))
+        return level_data
     
-    def createLookupTable(self, level_data):
-        self.lookup_table = {}
+    def create_look_up_table(self, level_data: List[List[str]]) -> None:
+        '''Creates a lookup table for the level data'''
+        self.look_up_table = {}
         for row_index, row in enumerate(level_data):
-            for col_index, symbol in enumerate(row):
-                position = TileCollection.getKey(col_index, row_index)
-                self.lookup_table[position] = Tile(position, self.tile_symbols[symbol])
+            for column_index, tile_symbol in enumerate(row):
+                tile_type = self.tile_symbols[tile_symbol]
+                position = (column_index * TILE_WIDTH, row_index * TILE_WIDTH)
+                self.look_up_table[(column_index, row_index)] = Tile(position, tile_type)
 
-    def addTileItems(self, item_data):
-        for row_index, row in enumerate(item_data):
-            for col_index, item_symbol in enumerate(row):
-                position = TileCollection.getKey(col_index, row_index)
-                if position in self.lookup_table:
-                    current_tile = self.lookup_table[position]
-                    self.attachItemToTile(current_tile, item_symbol)
-                else:
-                    print(f"Warning: No tile found at position {position} for {item_symbol}.")
+    def set_tile_sprites(self, level_data: List[List[str]]) -> None:
+        sprite_sheet = SpriteSheet(os.path.join('pacman', 'assets', 'sprites', 'Maze-Parts.png'))
+        for row_index, row in enumerate(level_data):
+            for column_index, tile in enumerate(row):
+                try:
+                    sprite = SpriteSheet.get_image(sprite_sheet, column_index * TILE_WIDTH, row_index * TILE_WIDTH, TILE_WIDTH, TILE_HEIGHT)
+                    self.look_up_table[(column_index, row_index)].sprite = sprite
+                except:
+                    pass
+            
 
-    def attachItemToTile(self, tile, item_symbol):
-        position = tile.position.asTuple()
-        if item_symbol == '.':
-            tile.tile_item = Pellet(*position)
-        elif item_symbol == '+':
-            tile.tile_item = PowerPellet(*position)
-        elif item_symbol == 'F':
-            tile.tile_item = Fruit(*position)
+    def connect_tiles(self) -> None:
+        for row_index in range(NUM_ROWS):
+            for column_index in range(NUM_COLS):
+                tile = self.look_up_table[(column_index, row_index)]
+                if row_index > 0:
+                    tile.connect(UP, self.look_up_table[(column_index, row_index - 1)])
+                if row_index < NUM_ROWS - 1:
+                    tile.connect(DOWN, self.look_up_table[(column_index, row_index + 1)])
+                if column_index > 0:
+                    tile.connect(LEFT, self.look_up_table[(column_index - 1, row_index)])
+                if column_index < NUM_COLS - 1:
+                    tile.connect(RIGHT, self.look_up_table[(column_index + 1, row_index)])
+                # tile.set_tile_sprite()
 
+    def get_tile(self, column_index: int, row_index: int) -> Tile:
+        '''Returns the tile at the given column and row index'''
+        return self.look_up_table[(column_index, row_index)]
+    
+    def add_items(self):
+        '''Adds items to the tiles'''
+        self.items = []
+        for row_index in range(NUM_ROWS):
+            for column_index in range(NUM_COLS):
+                tile = self.look_up_table[(column_index, row_index)]
+                if tile.type == PATH:
+                    tile.item = Pellet(tile.position.as_tuple())
+                    self.items.append(tile.item)
+        self.power_pellets = []
+        power_pellet_locations = [(1, 6), (26, 6), (1, 26), (26, 26)]
+        for location in power_pellet_locations:
+            self.look_up_table[location].item = PowerPellet(self.look_up_table[location].position.as_tuple())
+            self.items.append(self.look_up_table[location].item)
+            self.power_pellets.append(self.look_up_table[location].item)
 
-    def connectNeighbors(self, data):
-        for i in range(len(data)):
-            for j in range(len(data[i])):
-                current_tile = self.lookup_table[TileCollection.getKey(j, i)]
-
-                if i > 0:
-                    above_tile = self.lookup_table.get(TileCollection.getKey(j, i - 1))
-                    current_tile.connect(above_tile, UP)
-                            
-                if i < len(data) - 1:
-                    below_tile = self.lookup_table.get(TileCollection.getKey(j, i + 1))
-                    current_tile.connect(below_tile, DOWN)
-                
-                if j > 0:
-                    left_tile = self.lookup_table.get(TileCollection.getKey(j - 1, i))
-                    current_tile.connect(left_tile, LEFT)
-                
-                if j < len(data[i]) - 1:
-                    right_tile = self.lookup_table.get(TileCollection.getKey(j + 1, i))
-                    current_tile.connect(right_tile, RIGHT)
-
-                current_tile.setWallSprite(SpriteSheet(os.path.join('pacman', 'Assets', 'Sprites', 'test9.png')))
-
-    def render(self, screen):
-        for tile in self.lookup_table.values():
+    def render(self, screen: pygame.Surface) -> None:
+        '''Renders the tiles on the screen'''
+        for tile in self.look_up_table.values():
             tile.render(screen)
-            '''tile_center = tile.getTileCenter()  # Get the tile center from the current tile
-            text = tile.font.render(tile.id, True, (255, 255, 255))
-            text_rect = text.get_rect(center=tile_center)
-            screen.blit(text, text_rect)'''
-
-
+    
